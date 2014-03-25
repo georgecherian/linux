@@ -143,4 +143,21 @@
 #define AM43XX_CM_PER_USB_OTG_SS1_CLKCTRL_OFFSET        0x0268
 #define AM43XX_CM_PER_USBPHYOCP2SCP1_CLKCTRL_OFFSET	0x05C0
 
+#define AM43XX_WUCLK_CTRL_MASK				(1 << 8)
+#define AM43XX_WUCLK_STATUS_SHIFT			9
+#define AM43XX_WUCLK_STATUS_MASK			(1 << 9)
+#define AM43XX_GLOBAL_WUEN_MASK			(1 << 16)
+
+#define AM43XX_PRM_IO_PMCTRL_OFFSET			0x0024
+
+#ifndef __ASSEMBLER__
+/* PRM interrupt-related functions */
+extern void am43x_prm_read_pending_irqs(unsigned long *events);
+extern void am43x_prm_ocp_barrier(void);
+extern void am43x_prm_save_and_clear_irqen(u32 *saved_mask);
+extern void am43x_prm_restore_irqen(u32 *saved_mask);
+extern int __init am43x_prm_init(void);
+void am43x_prm_reconfigure_io_chain(void);
+#endif
+
 #endif
