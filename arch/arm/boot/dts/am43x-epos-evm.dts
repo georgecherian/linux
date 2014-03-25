@@ -81,6 +81,13 @@
 			>;
 		};
 
+		uart0_pins: uart0_pins {
+			pinctrl-single,pins = <
+				0x170 (PIN_INPUT_PULLUP | SLEWCTRL_FAST | DS0_PULL_UP_DOWN_EN | MUX_MODE0) /* uart0_rxd.uart0_rxd */
+				0x174 (PIN_INPUT_PULLUP | SLEWCTRL_FAST | DS0_PULL_UP_DOWN_EN | MUX_MODE0) /* uart0_txd.uart0_txd */
+			>;
+		};
+
 		nand_flash_x8: nand_flash_x8 {
 			pinctrl-single,pins = <
 				0x40 (PIN_OUTPUT_PULLDOWN | MUX_MODE7)	/* gpmc_a0.SELQSPIorNAND/GPIO */
@@ -242,6 +249,14 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c2_pins>;
 	status = "okay";
+};
+
+&uart0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pins>;
+	interrupts-extended = <&gic GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH
+				&am43xx_pinmux 0x170>;
 };
 
 &gpio0 {
