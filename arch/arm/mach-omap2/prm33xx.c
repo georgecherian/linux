@@ -19,6 +19,7 @@
 #include <linux/err.h>
 #include <linux/io.h>
 
+#include "soc.h"
 #include "common.h"
 #include "powerdomain.h"
 #include "prm33xx.h"
@@ -505,3 +506,14 @@ static void __init am43x_prm_enable_io_wakeup(void)
 				AM43XX_PRM_DEVICE_INST,
 				AM43XX_PRM_IO_PMCTRL_OFFSET);
 }
+
+static int __init am43x_prm_late_init(void)
+{
+	if (!soc_is_am43xx())
+		return 0;
+
+	am43x_prm_enable_io_wakeup();
+
+	return omap_prcm_register_chain_handler(&am43x_prcm_irq_setup);
+}
+omap_subsys_initcall(am43x_prm_late_init);
