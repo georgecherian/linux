@@ -23,6 +23,28 @@
 #include "powerdomain.h"
 #include "prm33xx.h"
 #include "prm-regbits-33xx.h"
+#include "prcm43xx.h"
+
+#define AM43XX_IRQ_GIC_START	32
+
+/* Static data */
+
+static const struct omap_prcm_irq am43x_prcm_irqs[] = {
+	OMAP_PRCM_IRQ("io",     9,      1),
+};
+
+static struct omap_prcm_irq_setup am43x_prcm_irq_setup = {
+	.ack			= AM33XX_PRM_IRQSTATUS_MPU_OFFSET,
+	.mask			= AM33XX_PRM_IRQENABLE_MPU_OFFSET,
+	.nr_regs		= 1,
+	.irqs			= am43x_prcm_irqs,
+	.nr_irqs		= ARRAY_SIZE(am43x_prcm_irqs),
+	.irq			= 11 + AM43XX_IRQ_GIC_START,
+	.read_pending_irqs	= &am43x_prm_read_pending_irqs,
+	.ocp_barrier		= &am43x_prm_ocp_barrier,
+	.save_and_clear_irqen	= &am43x_prm_save_and_clear_irqen,
+	.restore_irqen		= &am43x_prm_restore_irqen,
+};
 
 /* Read a register in a PRM instance */
 u32 am33xx_prm_read_reg(s16 inst, u16 idx)
@@ -343,3 +365,143 @@ struct pwrdm_ops am33xx_pwrdm_operations = {
 	.pwrdm_wait_transition		= am33xx_pwrdm_wait_transition,
 	.pwrdm_has_voltdm		= am33xx_check_vcvp,
 };
+
+static inline u32 _read_pending_irq_reg(u16 irqen_offs, u16 irqst_offs)
+{
+	u32 mask, st;
+
+	/* XXX read mask from RAM? */
+	mask = am33xx_prm_read_reg(AM43XX_PRM_OCP_SOCKET_INST,
+				       irqen_offs);
+	st = am33xx_prm_read_reg(AM43XX_PRM_OCP_SOCKET_INST, irqst_offs);
+
+	return mask & st;
+}
+
+/**
+ * omap44xx_prm_read_pending_irqs - read pending PRM MPU IRQs into @events
+ * @events: ptr to two consecutive u32s, preallocated by caller
+ *
+ * Read PRM_IRQSTATUS_MPU* bits, AND'ed with the currently-enabled PRM
+ * MPU IRQs, and store the result into the two u32s pointed to by @events.
+ * No return value.
+ */
+void am43x_prm_read_pending_irqs(unsigned long *events)
+{
+	events[0] = _read_pending_irq_reg(AM33XX_PRM_IRQENABLE_MPU_OFFSET,
+					  AM33XX_PRM_IRQSTATUS_MPU_OFFSET);
+}
+
+/**
+ * omap44xx_prm_ocp_barrier - force buffered MPU writes to the PRM to complete
+ *
+ * Force any buffered writes to the PRM IP block to complete.  Needed
+ * by the PRM IRQ handler, which reads and writes directly to the IP
+ * block, to avoid race conditions after acknowledging or clearing IRQ
+ * bits.  No return value.
+ */
+void am43x_prm_ocp_barrier(void)
+{
+	am33xx_prm_read_reg(AM43XX_PRM_OCP_SOCKET_INST,
+			    AM33XX_REVISION_PRM_OFFSET);
+}
+
+/**
+ * omap44xx_prm_save_and_clear_irqen - save/clear PRM_IRQENABLE_MPU* regs
+ * @saved_mask: ptr to a u32 array to save IRQENABLE bits
+ *
+ * Save the PRM_IRQENABLE_MPU and PRM_IRQENABLE_MPU_2 registers to
+ * @saved_mask.  @saved_mask must be allocated by the caller.
+ * Intended to be used in the PRM interrupt handler suspend callback.
+ * The OCP barrier is needed to ensure the write to disable PRM
+ * interrupts reaches the PRM before returning; otherwise, spurious
+ * interrupts might occur.  No return value.
+ */
+void am43x_prm_save_and_clear_irqen(u32 *saved_mask)
+{
+	saved_mask[0] =
+		am33xx_prm_read_reg(AM43XX_PRM_OCP_SOCKET_INST,
+				    AM33XX_PRM_IRQSTATUS_MPU_OFFSET);
+
+	am33xx_prm_write_reg(0, AM43XX_PRM_OCP_SOCKET_INST,
+			     AM33XX_PRM_IRQENABLE_MPU_OFFSET);
+
+	/* OCP barrier */
+	am33xx_prm_read_reg(AM43XX_PRM_OCP_SOCKET_INST,
+			    AM33XX_REVISION_PRM_OFFSET);
+}
+
+/**
+ * omap44xx_prm_restore_irqen - set PRM_IRQENABLE_MPU* registers from args
+ * @saved_mask: ptr to a u32 array of IRQENABLE bits saved previously
+ *
+ * Restore the PRM_IRQENABLE_MPU and PRM_IRQENABLE_MPU_2 registers from
+ * @saved_mask.  Intended to be used in the PRM interrupt handler resume
+ * callback to restore values saved by omap44xx_prm_save_and_clear_irqen().
+ * No OCP barrier should be needed here; any pending PRM interrupts will fire
+ * once the writes reach the PRM.  No return value.
+ */
+void am43x_prm_restore_irqen(u32 *saved_mask)
+{
+	am33xx_prm_write_reg(saved_mask[0], AM43XX_PRM_OCP_SOCKET_INST,
+			     AM33XX_PRM_IRQENABLE_MPU_OFFSET);
+}
+
+/**
+ * omap44xx_prm_reconfigure_io_chain - clear latches and reconfigure I/O chain
+ *
+ * Clear any previously-latched I/O wakeup events and ensure that the
+ * I/O wakeup gates are aligned with the current mux settings.  Works
+ * by asserting WUCLKIN, waiting for WUCLKOUT to be asserted, and then
+ * deasserting WUCLKIN and waiting for WUCLKOUT to be deasserted.
+ * No return value. XXX Are the final two steps necessary?
+ */
+void am43x_prm_reconfigure_io_chain(void)
+{
+	int i = 0;
+
+	/* Trigger WUCLKIN enable */
+	am33xx_prm_rmw_reg_bits(AM43XX_WUCLK_CTRL_MASK,
+				AM43XX_WUCLK_CTRL_MASK,
+				AM43XX_PRM_DEVICE_INST,
+				AM43XX_PRM_IO_PMCTRL_OFFSET);
+	omap_test_timeout(
+		(((am33xx_prm_read_reg(AM43XX_PRM_DEVICE_INST,
+				       AM43XX_PRM_IO_PMCTRL_OFFSET) &
+		   AM43XX_WUCLK_STATUS_MASK) >>
+		  AM43XX_WUCLK_STATUS_SHIFT) == 1),
+		MAX_IOPAD_LATCH_TIME, i);
+	if (i == MAX_IOPAD_LATCH_TIME)
+		pr_warn("PRM: I/O chain clock line assertion timed out\n");
+
+	/* Trigger WUCLKIN disable */
+	am33xx_prm_rmw_reg_bits(AM43XX_WUCLK_CTRL_MASK, 0x0,
+				AM43XX_PRM_DEVICE_INST,
+				AM43XX_PRM_IO_PMCTRL_OFFSET);
+	omap_test_timeout(
+		(((am33xx_prm_read_reg(AM43XX_PRM_DEVICE_INST,
+					   AM43XX_PRM_IO_PMCTRL_OFFSET) &
+		   AM43XX_WUCLK_STATUS_MASK) >>
+		  AM43XX_WUCLK_STATUS_SHIFT) == 0),
+		MAX_IOPAD_LATCH_TIME, i);
+	if (i == MAX_IOPAD_LATCH_TIME)
+		pr_warn("PRM: I/O chain clock line deassertion timed out\n");
+
+	return;
+}
+
+/**
+ * omap44xx_prm_enable_io_wakeup - enable wakeup events from I/O wakeup latches
+ *
+ * Activates the I/O wakeup event latches and allows events logged by
+ * those latches to signal a wakeup event to the PRCM.  For I/O wakeups
+ * to occur, WAKEUPENABLE bits must be set in the pad mux registers, and
+ * omap44xx_prm_reconfigure_io_chain() must be called.  No return value.
+ */
+static void __init am43x_prm_enable_io_wakeup(void)
+{
+	am33xx_prm_rmw_reg_bits(AM43XX_GLOBAL_WUEN_MASK,
+				AM43XX_GLOBAL_WUEN_MASK,
+				AM43XX_PRM_DEVICE_INST,
+				AM43XX_PRM_IO_PMCTRL_OFFSET);
+}
