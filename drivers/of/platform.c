@@ -130,6 +130,56 @@ void of_device_make_bus_id(struct device *dev)
 	dev_set_name(dev, "%s.%d", node->name, magic - 1);
 }
 
+/*
+ * The device interrupts are not necessarily available for all
+ * irqdomains initially so we need to populate them using a
+ * notifier.
+ */
+static int of_device_resource_notify(struct notifier_block *nb,
+				     unsigned long event, void *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct device_node *np = pdev->dev.of_node;
+	struct resource *res = pdev->resource;
+	struct resource *irqr = NULL;
+	int num_irq, i, found = 0;
+
+	if (event != BUS_NOTIFY_BIND_DRIVER)
+		return 0;
+
+	if (!np)
+		goto out;
+
+	num_irq = of_irq_count(np);
+	if (!num_irq)
+		goto out;
+
+	for (i = 0; i < pdev->num_resources; i++, res++) {
+		if (res->flags != IORESOURCE_IRQ ||
+		    res->start != -EPROBE_DEFER ||
+		    res->end != -EPROBE_DEFER)
+			continue;
+
+		if (!irqr)
+			irqr = res;
+		found++;
+	}
+
+	if (!found)
+		goto out;
+
+	if (found != num_irq) {
+		dev_WARN(dev, "error populating irq resources: %i != %i\n",
+			 found, num_irq);
+		goto out;
+	}
+
+	WARN_ON(of_irq_to_resource_table(np, irqr, num_irq) != num_irq);
+
+out:
+	return NOTIFY_DONE;
+}
+
 /**
  * of_device_alloc - Allocate and initialize an of_device
  * @np: device node to assign to device
@@ -168,7 +218,13 @@ struct platform_device *of_device_alloc(struct device_node *np,
 			rc = of_address_to_resource(np, i, res);
 			WARN_ON(rc);
 		}
-		WARN_ON(of_irq_to_resource_table(np, res, num_irq) != num_irq);
+
+		/* See of_device_resource_notify for populating interrupts */
+		for (i = 0; i < num_irq; i++, res++) {
+			res->flags = IORESOURCE_IRQ;
+			res->start = -EPROBE_DEFER;
+			res->end = -EPROBE_DEFER;
+		}
 	}
 
 	dev->dev.of_node = of_node_get(np);
@@ -444,6 +500,8 @@ int of_platform_bus_probe(struct device_node *root,
 }
 EXPORT_SYMBOL(of_platform_bus_probe);
 
+static struct notifier_block resource_nb;
+
 /**
  * of_platform_populate() - Populate platform_devices from device tree data
  * @root: parent of the first level to probe or NULL for the root of the tree
@@ -474,6 +532,11 @@ int of_platform_populate(struct device_node *root,
 	root = root ? of_node_get(root) : of_find_node_by_path("/");
 	if (!root)
 		return -EINVAL;
+
+	if (!resource_nb.notifier_call) {
+		resource_nb.notifier_call = of_device_resource_notify,
+			bus_register_notifier(&platform_bus_type, &resource_nb);
+	}
 
 	for_each_child_of_node(root, child) {
 		rc = of_platform_bus_create(child, matches, lookup, parent, true);
