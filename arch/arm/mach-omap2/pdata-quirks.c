@@ -341,6 +341,9 @@ struct of_dev_auxdata omap_auxdata_lookup[] __initdata = {
 	OF_DEV_AUXDATA("ti,omap4-iommu", 0x55082000, "55082000.mmu",
 		       &omap4_iommu_pdata),
 #endif
+#ifdef CONFIG_SOC_AM43XX
+	OF_DEV_AUXDATA("ti,am43-padconf", 0x44e10800, "44e10800.pinmux", &pcs_pdata),
+#endif
 	{ /* sentinel */ },
 };
 
