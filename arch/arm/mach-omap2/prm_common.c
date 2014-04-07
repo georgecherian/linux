@@ -33,6 +33,7 @@
 #include "prm2xxx.h"
 #include "prm3xxx.h"
 #include "prm44xx.h"
+#include "prcm43xx.h"
 #include "common.h"
 #include "clock.h"
 
@@ -333,6 +334,9 @@ int omap_prcm_register_chain_handler(struct omap_prcm_irq_setup *irq_setup)
 		if (cpu_is_omap34xx())
 			omap_pcs_legacy_init(irq,
 				omap3xxx_prm_reconfigure_io_chain);
+		else if (soc_is_am43xx())
+			omap_pcs_legacy_init(irq,
+					am43x_prm_reconfigure_io_chain);
 		else
 			omap_pcs_legacy_init(irq,
 				omap44xx_prm_reconfigure_io_chain);
