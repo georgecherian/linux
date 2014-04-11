@@ -1917,6 +1917,11 @@ static int serial_omap_runtime_resume(struct device *dev)
 	up->latency = up->calc_latency;
 	schedule_work(&up->qos_work);
 
+	if (up->wakeups_enabled) {
+		serial_omap_enable_wakeup(up, false);
+		up->wakeups_enabled = false;
+	}
+
 	return 0;
 }
 #endif
