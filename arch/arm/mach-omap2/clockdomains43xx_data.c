@@ -111,7 +111,7 @@ static struct clockdomain emif_43xx_clkdm = {
 	.prcm_partition	  = AM43XX_CM_PARTITION,
 	.cm_inst	  = AM43XX_CM_PER_INST,
 	.clkdm_offs	  = AM43XX_CM_PER_EMIF_CDOFFS,
-	.flags		  = CLKDM_CAN_SWSUP,
+	.flags		  = CLKDM_CAN_HWSUP,
 };
 
 static struct clockdomain l4_wkup_aon_43xx_clkdm = {
