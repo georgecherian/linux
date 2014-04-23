@@ -305,16 +305,61 @@ static int omap_usb2_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_RUNTIME
+static int omap_usb2_enable_phywkup(struct omap_usb *phy)
+{
+        omap_control_phy_wkup(phy->control_dev, 1);
+ 
+        return 0;
+}
 
+static int omap_usb2_disable_phywkup(struct omap_usb *phy)
+{
+        omap_control_phy_wkup(phy->control_dev, 0);
+ 
+        return 0;
+}
+ 
+static void omap_usb2_disable_clocks(struct omap_usb *phy)
+{
+
+        clk_disable(phy->wkupclk);
+        if (!IS_ERR(phy->optclk))
+                clk_disable(phy->optclk);
+}
+ 
+static int omap_usb2_enable_clocks(struct omap_usb *phy)
+ {
+        int ret;
+
+        ret = clk_enable(phy->wkupclk);
+        if (ret < 0) {
+                dev_err(phy->dev, "Failed to enable wkupclk %d\n", ret);
+                goto err0;
+        }
+
+        if (!IS_ERR(phy->optclk)) {
+                ret = clk_enable(phy->optclk);
+                if (ret < 0) {
+                        dev_err(phy->dev, "Failed to enable optclk %d\n", ret);
+                        goto err1;
+                }
+        }
+
+        return 0;
+
+err1:
+        clk_disable(phy->wkupclk);
+
+err0:
+        return ret;
+} 
+#ifdef CONFIG_PM_RUNTIME
 static int omap_usb2_runtime_suspend(struct device *dev)
 {
 	struct platform_device	*pdev = to_platform_device(dev);
 	struct omap_usb	*phy = platform_get_drvdata(pdev);
 
-	clk_disable(phy->wkupclk);
-	if (!IS_ERR(phy->optclk))
-		clk_disable(phy->optclk);
+        omap_usb2_disable_clocks(phy);
 
 	return 0;
 }
@@ -325,38 +370,70 @@ static int omap_usb2_runtime_resume(struct device *dev)
 	struct omap_usb	*phy = platform_get_drvdata(pdev);
 	int ret;
 
-	ret = clk_enable(phy->wkupclk);
-	if (ret < 0) {
-		dev_err(phy->dev, "Failed to enable wkupclk %d\n", ret);
-		goto err0;
-	}
-
-	if (!IS_ERR(phy->optclk)) {
-		ret = clk_enable(phy->optclk);
-		if (ret < 0) {
-			dev_err(phy->dev, "Failed to enable optclk %d\n", ret);
-			goto err1;
-		}
-	}
-
-	return 0;
-
-err1:
-	clk_disable(phy->wkupclk);
-
-err0:
+        ret = omap_usb2_enable_clocks(phy);
 	return ret;
+}
+#endif
+
+static int omap_usb2_suspend(struct device *dev)
+{
+        struct platform_device  *pdev = to_platform_device(dev);
+        struct omap_usb *phy = platform_get_drvdata(pdev);
+        void __iomem *addr;
+#if 0
+        void __iomem *prmaddr;
+        u32 prm_io;
+
+        prmaddr = ioremap(0x44df4024, 4);
+#endif
+        addr = ioremap(0x44e11320, 4);
+        writel(0x208, addr);
+        //if (phy->flags & OMAP_USB2_ENABLE_PHYWKUP)
+                omap_usb2_enable_phywkup(phy);
+
+        if (!pm_runtime_suspended(dev))
+                omap_usb2_disable_clocks(phy);
+        writel(0xc0000208, addr);
+        mdelay(10);
+        writel(0x80000208, addr);
+#if 0
+        printk (" PRM_IO 0x%x \n",readl(prmaddr));
+        prm_io = readl(prmaddr);
+        prm_io |= 0x10100;
+        writel(prm_io , addr);
+        while (!(readl(prmaddr) & 0x200));
+        prm_io = readl(prmaddr);
+        prm_io &= 0xfffffeff;
+        while (!(readl(prmaddr) & 0x200));
+        iounmap(prmaddr);
+#endif
+        iounmap(addr);
+        return 0;
+}
+
+static int omap_usb2_resume(struct device *dev)
+{
+        struct platform_device  *pdev = to_platform_device(dev);
+        struct omap_usb *phy = platform_get_drvdata(pdev);
+        int ret;
+
+        ret = omap_usb2_enable_clocks(phy);
+        //if (phy->flags & OMAP_USB2_ENABLE_PHYWKUP)
+                omap_usb2_disable_phywkup(phy);
+
+        pm_runtime_disable(dev);
+        pm_runtime_set_active(dev);
+        pm_runtime_enable(dev);
+
+        return ret;
 }
 
 static const struct dev_pm_ops omap_usb2_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(omap_usb2_suspend, omap_usb2_resume)
 	SET_RUNTIME_PM_OPS(omap_usb2_runtime_suspend, omap_usb2_runtime_resume,
 		NULL)
 };
 
-#define DEV_PM_OPS     (&omap_usb2_pm_ops)
-#else
-#define DEV_PM_OPS     NULL
-#endif
 
 static struct platform_driver omap_usb2_driver = {
 	.probe		= omap_usb2_probe,
@@ -364,7 +441,7 @@ static struct platform_driver omap_usb2_driver = {
 	.driver		= {
 		.name	= "omap-usb2",
 		.owner	= THIS_MODULE,
-		.pm	= DEV_PM_OPS,
+		.pm	= &omap_usb2_pm_ops,
 		.of_match_table = of_match_ptr(omap_usb2_id_table),
 	},
 };

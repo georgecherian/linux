@@ -95,8 +95,8 @@ void omap_control_phy_power(struct device *dev, int on)
 		} else {
 			val &= ~(AM437X_CTRL_USB2_OTGVDET_EN |
 					AM437X_CTRL_USB2_OTGSESSEND_EN);
-			val |= (AM437X_CTRL_USB2_PHY_PD |
-					 AM437X_CTRL_USB2_OTG_PD);
+//			val |= (AM437X_CTRL_USB2_PHY_PD |
+//					 AM437X_CTRL_USB2_OTG_PD);
 		}
 		break;
 	default:
@@ -108,6 +108,48 @@ void omap_control_phy_power(struct device *dev, int on)
 	writel(val, control_phy->power);
 }
 EXPORT_SYMBOL_GPL(omap_control_phy_power);
+
+/**     
+ *  * omap_control_phy_wkup - PHY wkup on/off the phy using control module reg
+ *   * @dev: the control module device
+ *    * @on: 0 or 1, based on enable phy wakeup or disable phy wakeup
+ *     */
+#define AM437X_CTRL_USB2_WKUP_EN        BIT(21)
+void omap_control_phy_wkup(struct device *dev, int on)
+{
+        u32 val;
+        struct omap_control_phy *control_phy;
+        
+        if (IS_ERR(dev) || !dev) {
+                pr_err("%s: invalid device\n", __func__);
+                return;
+        }
+
+        control_phy = dev_get_drvdata(dev);
+        if (!control_phy) {
+                dev_err(dev, "%s: invalid control phy device\n", __func__);
+                return;
+        }
+
+        val = readl(control_phy->power);
+        
+        switch (control_phy->type) {
+        case OMAP_CTRL_TYPE_AM437USB2:
+                if (on)
+                        val |= AM437X_CTRL_USB2_WKUP_EN;
+                else 
+                        val &= ~(AM437X_CTRL_USB2_WKUP_EN);
+                break;
+        
+        default:
+                dev_err(dev, "%s: type %d not recognized\n",
+                        __func__, control_phy->type);
+                break;  
+        }       
+        
+        writel(val, control_phy->power);
+}
+EXPORT_SYMBOL_GPL(omap_control_phy_wkup);
 
 /**
  * omap_control_usb_host_mode - set AVALID, VBUSVALID and ID pin in grounded

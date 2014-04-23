@@ -74,6 +74,7 @@ enum omap_control_usb_mode {
 void omap_control_phy_power(struct device *dev, int on);
 void omap_control_usb_set_mode(struct device *dev,
 			       enum omap_control_usb_mode mode);
+void omap_control_phy_wkup(struct device *dev, int on); 
 #else
 
 static inline void omap_control_phy_power(struct device *dev, int on)
